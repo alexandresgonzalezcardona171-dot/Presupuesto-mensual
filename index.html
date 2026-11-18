@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard de Presupuesto</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--tx:#17212b;--mu:#6b7785;--bd:#e3e8ee;--ac:#0f9d8a;--ok:#1a9e5c;--wa:#d98a00;--er:#d6403a;--sh:0 1px 3px rgba(20,30,40,.08)}
+@media(prefers-color-scheme:dark){:root{--bg:#10161c;--card:#1a232c;--tx:#e8eef4;--mu:#93a1b0;--bd:#2a3642;--ac:#2cc4ad;--ok:#3ccf86;--wa:#f0b13a;--er:#ff6b63;--sh:none}}
+*{box-sizing:border-box;margin:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);padding:20px;max-width:1280px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+h1{font-size:22px}h1 small{display:block;font-size:13px;color:var(--mu);font-weight:400;margin-top:2px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,select,input[type=search]{font:inherit;font-size:13px;padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}
+.chip{font-size:12px;color:var(--mu);padding:6px 10px;border:1px dashed var(--bd);border-radius:20px}
+.chip.on{color:var(--ok);border-color:var(--ok)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+.card{background:var(--card);border-radius:12px;padding:16px 18px;box-shadow:var(--sh);border:1px solid var(--bd)}
+.k .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mu)}
+.k .v{font-size:22px;font-weight:700;margin:4px 0 2px}.k .s{font-size:12px;color:var(--mu)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:14px}
+h3{font-size:14px;margin-bottom:12px}
+.cv{position:relative;height:280px}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--mu);padding:8px 10px;border-bottom:2px solid var(--bd);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--bd);white-space:nowrap}
+td.n,th.n{text-align:right}
+.pb{height:8px;background:var(--bd);border-radius:4px;min-width:90px;overflow:hidden}.pb i{display:block;height:100%;border-radius:4px}
+.tag{font-size:11px;font-weight:600;padding:3px 9px;border-radius:12px}
+.OK,.Meta{background:#1a9e5c22;color:var(--ok)}.Atención{background:#d98a0022;color:var(--wa)}.Excedido{background:#d6403a22;color:var(--er)}
+.ins li{margin:0 0 8px 18px;font-size:14px;line-height:1.45}
+#drop{display:none;position:fixed;inset:0;background:#0f9d8acc;color:#fff;font-size:26px;align-items:center;justify-content:center;z-index:9}
+#err{color:var(--er);font-size:13px;margin-bottom:10px}
+@media print{.bar{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="t">Dashboard de gastos<small id="sub"></small></h1>
+  <div class="bar">
+    <span id="chip" class="chip"></span>
+    <button class="p" id="bLink">🔗 Vincular Excel</button>
+    <button id="bFile">📂 Cargar archivo</button>
+    <input type="file" id="fi" accept=".xlsx,.xlsm" hidden>
+  </div>
+</header>
+<div id="err"></div>
+<section class="kpis" id="kpis"></section>
+<section class="grid">
+  <div class="card"><h3>Gasto acumulado vs. ritmo ideal</h3><div class="cv"><canvas id="c1"></canvas></div></div>
+  <div class="card"><h3>Presupuesto vs. real por categoría</h3><div class="cv"><canvas id="c2"></canvas></div></div>
+  <div class="card"><h3>Regla 50/30/20 (% de ingresos)</h3><div class="cv"><canvas id="c3"></canvas></div></div>
+  <div class="card"><h3>Gasto por método de pago</h3><div class="cv"><canvas id="c4"></canvas></div></div>
+</section>
+<section class="card" style="margin-bottom:14px"><h3>Hallazgos automáticos</h3><ul class="ins" id="ins"></ul></section>
+<section class="card" style="margin-bottom:14px"><h3>Presupuesto por categoría</h3><div class="wrap"><table id="tc"></table></div></section>
+<section class="card"><h3 style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">Detalle de gastos
+  <span class="bar"><select id="fc"></select><input type="search" id="fq" placeholder="Buscar…"></span></h3>
+  <div class="wrap"><table id="tg"></table></div></section>
+<div id="drop">Suelta tu Excel aquí</div>
+
+<script>
+const EMB={"mes": 46327, "ing": 4500000, "cats": [{"n": "Vivienda / Arriendo", "t": "Necesidad", "p": 1300000}, {"n": "Servicios públicos", "t": "Necesidad", "p": 300000}, {"n": "Alimentación (mercado)", "t": "Necesidad", "p": 700000}, {"n": "Transporte", "t": "Necesidad", "p": 250000}, {"n": "Salud", "t": "Necesidad", "p": 150000}, {"n": "Educación", "t": "Necesidad", "p": 150000}, {"n": "Deudas y tarjetas", "t": "Necesidad", "p": 300000}, {"n": "Restaurantes y domicilios", "t": "Deseo", "p": 300000}, {"n": "Entretenimiento", "t": "Deseo", "p": 200000}, {"n": "Ropa y cuidado personal", "t": "Deseo", "p": 150000}, {"n": "Otros / imprevistos", "t": "Deseo", "p": 100000}, {"n": "Ahorro e inversión", "t": "Ahorro", "p": 600000}], "gastos": [{"f": 46327, "c": "Vivienda / Arriendo", "d": "Arriendo noviembre", "m": "Transferencia", "v": 1300000}, {"f": 46327, "c": "Ahorro e inversión", "d": "Aporte a ahorro mensual", "m": "Transferencia", "v": 600000}, {"f": 46328, "c": "Alimentación (mercado)", "d": "Mercado semanal Éxito", "m": "Débito", "v": 185000}, {"f": 46328, "c": "Transporte", "d": "Recarga tarjeta Cívica (Metro)", "m": "Efectivo", "v": 40000}, {"f": 46329, "c": "Restaurantes y domicilios", "d": "Almuerzo con amigos", "m": "Tarjeta de crédito", "v": 58000}, {"f": 46330, "c": "Entretenimiento", "d": "Cine", "m": "Débito", "v": 42000}, {"f": 46331, "c": "Servicios públicos", "d": "EPM energía y agua", "m": "Transferencia", "v": 265000}, {"f": 46331, "c": "Alimentación (mercado)", "d": "Frutas y verduras plaza", "m": "Efectivo", "v": 45000}, {"f": 46332, "c": "Transporte", "d": "Gasolina moto", "m": "Efectivo", "v": 35000}, {"f": 46333, "c": "Restaurantes y domicilios", "d": "Domicilio pizza", "m": "Nequi/Daviplata", "v": 52000}, {"f": 46334, "c": "Salud", "d": "Medicamentos", "m": "Débito", "v": 48000}, {"f": 46335, "c": "Alimentación (mercado)", "d": "Mercado semanal", "m": "Débito", "v": 210000}, {"f": 46335, "c": "Transporte", "d": "Taxi", "m": "Nequi/Daviplata", "v": 24000}, {"f": 46336, "c": "Servicios públicos", "d": "Internet y celular", "m": "Tarjeta de crédito", "v": 125000}, {"f": 46337, "c": "Deudas y tarjetas", "d": "Pago cuota tarjeta", "m": "Transferencia", "v": 250000}, {"f": 46338, "c": "Ropa y cuidado personal", "d": "Camiseta", "m": "Tarjeta de crédito", "v": 89000}, {"f": 46339, "c": "Entretenimiento", "d": "Salida con amigos", "m": "Efectivo", "v": 95000}, {"f": 46339, "c": "Restaurantes y domicilios", "d": "Cena", "m": "Tarjeta de crédito", "v": 76000}, {"f": 46340, "c": "Educación", "d": "Curso en línea", "m": "Tarjeta de crédito", "v": 150000}, {"f": 46341, "c": "Alimentación (mercado)", "d": "Mercado quincena", "m": "Débito", "v": 230000}, {"f": 46341, "c": "Transporte", "d": "Recarga tarjeta Cívica (Metro)", "m": "Efectivo", "v": 40000}, {"f": 46342, "c": "Restaurantes y domicilios", "d": "Almuerzo domingo", "m": "Efectivo", "v": 64000}, {"f": 46342, "c": "Entretenimiento", "d": "Suscripciones streaming", "m": "Tarjeta de crédito", "v": 48000}, {"f": 46343, "c": "Otros / imprevistos", "d": "Reparación celular", "m": "Débito", "v": 85000}, {"f": 46343, "c": "Transporte", "d": "Gasolina moto", "m": "Efectivo", "v": 35000}, {"f": 46343, "c": "Salud", "d": "Consulta médica", "m": "Débito", "v": 60000}]};
+const $=s=>document.querySelector(s);
+const fmt=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
+const pc=n=>Math.round(n*100)+'%';
+const ser=s=>new Date(Math.round((s-25569)*864e5));
+const MES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const COL=['#0f9d8a','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#64748b','#84cc16','#f97316','#06b6d4','#a855f7'];
+let D=EMB,src='Datos de ejemplo embebidos',charts={},linked=null,lastMod=0,M=null;
+
+function parse(wb){
+  const rows=n=>{if(!wb.Sheets[n])throw Error('Falta la hoja "'+n+'"');return XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null})};
+  const c=rows('Config');let mes,ing,hi=-1,cats=[];
+  c.forEach((r,i)=>{const a=String(r[0]||'');if(a.startsWith('Mes'))mes=r[1];if(a.startsWith('Ingresos'))ing=r[1];if(a==='Categoría')hi=i});
+  if(typeof mes!=='number'||hi<0)throw Error('No pude leer la hoja Config');
+  for(let i=hi+1;i<c.length;i++){const r=c[i];if(!r[0]||String(r[0]).startsWith('Total'))break;cats.push({n:r[0],t:r[1],p:+r[2]||0})}
+  const g=rows('Gastos'),gi=g.findIndex(r=>r[0]==='Fecha'),gastos=[];
+  for(let i=gi+1;i<g.length;i++){const r=g[i];if(typeof r[0]==='number'&&+r[4])gastos.push({f:r[0],c:r[1],d:r[2]||'',m:r[3]||'',v:+r[4]})}
+  return{mes,ing:+ing||0,cats,gastos};
+}
+function compute(d){
+  const m=ser(d.mes),y=m.getUTCFullYear(),mo=m.getUTCMonth(),dim=new Date(Date.UTC(y,mo+1,0)).getUTCDate();
+  const gs=d.gastos.map(g=>({...g,dt:ser(g.f)})).filter(g=>g.dt.getUTCFullYear()==y&&g.dt.getUTCMonth()==mo).sort((a,b)=>b.f-a.f);
+  const n=new Date(),inM=n.getFullYear()==y&&n.getMonth()==mo;
+  const el=inM?n.getDate():(n>new Date(y,mo,dim)?dim:1);
+  const tot=gs.reduce((s,g)=>s+g.v,0),pres=d.cats.reduce((s,c)=>s+c.p,0);
+  const cats=d.cats.map(c=>{const real=gs.filter(g=>g.c===c.n).reduce((s,g)=>s+g.v,0),u=c.p?real/c.p:0;
+    let e=c.t==='Ahorro'?(u>=1?'Meta cumplida':u>=.8?'Atención':'OK'):(u>1?'Excedido':u>=.8?'Atención':'OK');
+    return{...c,real,u,e,dif:c.p-real}});
+  const T=t=>cats.filter(c=>c.t===t).reduce((s,c)=>s+c.real,0);
+  const nec=T('Necesidad'),des=T('Deseo');
+  const by=k=>{const o={};gs.forEach(g=>o[g[k]]=(o[g[k]]||0)+g.v);return o};
+  const cum=[];let a=0;for(let i=1;i<=el;i++){a+=gs.filter(g=>g.dt.getUTCDate()===i).reduce((s,g)=>s+g.v,0);cum.push(a)}
+  return{y,mo,dim,el,gs,tot,pres,cats,nec,des,ing:d.ing,avg:tot/el,proy:tot/el*dim,cum,met:by('m'),dia:by('f')};
+}
+function kpis(){
+  const k=[['Ingresos',fmt(M.ing),'Mes completo'],['Total gastado',fmt(M.tot),pc(M.tot/M.pres)+' del presupuesto'],
+   ['Saldo disponible',fmt(M.pres-M.tot),'Presupuesto − gastado'],['Promedio diario',fmt(M.avg),M.el+' de '+M.dim+' días'],
+   ['Proyección de cierre',fmt(M.proy),'Lineal; arriendo y fijos la inflan'],['Tasa de ahorro real',pc((M.ing-M.nec-M.des)/M.ing),'Meta: 20%']];
+  $('#kpis').innerHTML=k.map(x=>`<div class="card k"><div class="l">${x[0]}</div><div class="v">${x[1]}</div><div class="s">${x[2]}</div></div>`).join('');
+}
+function mk(id,cfg){charts[id]&&charts[id].destroy();charts[id]=new Chart($('#'+id),cfg)}
+function charts_(){
+  const st=getComputedStyle(document.documentElement);Chart.defaults.color=st.getPropertyValue('--mu').trim();Chart.defaults.borderColor=st.getPropertyValue('--bd').trim();
+  Chart.defaults.maintainAspectRatio=false;
+  const money={callbacks:{label:c=>' '+(c.dataset.label?c.dataset.label+': ':'')+fmt(c.raw)}};
+  const days=Array.from({length:M.dim},(_,i)=>i+1);
+  mk('c1',{type:'line',data:{labels:days,datasets:[
+    {label:'Real',data:M.cum,borderColor:COL[0],backgroundColor:COL[0]+'33',fill:true,tension:.25,pointRadius:2},
+    {label:'Ideal',data:days.map(d=>M.pres*d/M.dim),borderColor:COL[2],borderDash:[6,4],pointRadius:0}]},
+    options:{plugins:{tooltip:money},scales:{y:{ticks:{callback:v=>'$'+v/1e6+'M'}}}}});
+  mk('c2',{type:'bar',data:{labels:M.cats.map(c=>c.n),datasets:[
+    {label:'Presupuesto',data:M.cats.map(c=>c.p),backgroundColor:'#94a3b855'},
+    {label:'Real',data:M.cats.map(c=>c.real),backgroundColor:M.cats.map(c=>c.u>1?'#d6403a':COL[0])}]},
+    options:{indexAxis:'y',plugins:{tooltip:money},scales:{x:{ticks:{callback:v=>'$'+v/1e6+'M'}},y:{ticks:{font:{size:10}}}}}});
+  const r=[M.nec/M.ing,M.des/M.ing,(M.ing-M.nec-M.des)/M.ing];
+  mk('c3',{type:'bar',data:{labels:['Necesidades','Deseos','Ahorro'],datasets:[
+    {label:'Real',data:r.map(x=>x*100),backgroundColor:[COL[1],COL[2],COL[0]]},
+    {label:'Meta',data:[50,30,20],backgroundColor:'#94a3b866'}]},
+    options:{plugins:{tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+c.raw.toFixed(1)+'%'}}},scales:{y:{ticks:{callback:v=>v+'%'}}}}});
+  mk('c4',{type:'doughnut',data:{labels:Object.keys(M.met),datasets:[{data:Object.values(M.met),backgroundColor:COL,borderWidth:0}]},
+    options:{cutout:'60%',plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt(c.raw)}}}}});
+}
+function insights(){
+  const L=[],ex=M.cats.filter(c=>c.e==='Excedido'),top=[...M.cats].sort((a,b)=>b.real-a.real).filter(c=>c.t!=='Ahorro')[0];
+  const dd=Object.entries(M.dia).sort((a,b)=>b[1]-a[1])[0];
+  L.push(ex.length?`Categorías excedidas: <b>${ex.map(c=>`${c.n} (${fmt(-c.dif)} de más)`).join(', ')}</b>.`:'Ninguna categoría excedió su presupuesto.');
+  if(top)L.push(`Mayor gasto: <b>${top.n}</b> con ${fmt(top.real)} (${pc(top.real/M.tot)} del total).`);
+  if(dd){const dt=ser(+dd[0]);L.push(`Día de mayor gasto: <b>${dt.getUTCDate()} de ${MES[dt.getUTCMonth()]}</b> con ${fmt(dd[1])}.`)}
+  L.push(M.nec/M.ing>.5?`Las necesidades usan ${pc(M.nec/M.ing)} de tus ingresos, por encima de la meta del 50%.`:`Las necesidades están dentro de la meta del 50%.`);
+  L.push(`Ritmo: llevas ${fmt(M.tot)} en ${M.el} días; el ideal sería ${fmt(M.pres*M.el/M.dim)}.`);
+  $('#ins').innerHTML=L.map(x=>`<li>${x}</li>`).join('');
+}
+function tables(){
+  const col=e=>e==='Excedido'?'var(--er)':e==='Atención'?'var(--wa)':'var(--ok)';
+  $('#tc').innerHTML='<tr><th>Categoría</th><th>Tipo</th><th class="n">Presupuesto</th><th class="n">Real</th><th class="n">Disponible</th><th>Uso</th><th>Estado</th></tr>'+
+  M.cats.map(c=>`<tr><td>${c.n}</td><td>${c.t}</td><td class="n">${fmt(c.p)}</td><td class="n">${fmt(c.real)}</td><td class="n" style="color:${c.dif<0?'var(--er)':'inherit'}">${fmt(c.dif)}</td>
+  <td><div class="pb"><i style="width:${Math.min(c.u,1)*100}%;background:${col(c.e)}"></i></div><small>${pc(c.u)}</small></td><td><span class="tag ${c.e.split(' ')[0]}">${c.e}</span></td></tr>`).join('')+
+  `<tr style="font-weight:700"><td>Total</td><td></td><td class="n">${fmt(M.pres)}</td><td class="n">${fmt(M.tot)}</td><td class="n">${fmt(M.pres-M.tot)}</td><td>${pc(M.tot/M.pres)}</td><td></td></tr>`;
+  const f=$('#fc');const cur=f.value;f.innerHTML='<option value="">Todas las categorías</option>'+M.cats.map(c=>`<option>${c.n}</option>`).join('');f.value=cur;gastos();
+}
+function gastos(){
+  const c=$('#fc').value,q=$('#fq').value.toLowerCase();
+  const r=M.gs.filter(g=>(!c||g.c===c)&&(!q||(g.d+g.c+g.m).toLowerCase().includes(q)));
+  $('#tg').innerHTML='<tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Método</th><th class="n">Monto</th></tr>'+
+  r.map(g=>`<tr><td>${g.dt.getUTCDate()}/${g.dt.getUTCMonth()+1}</td><td>${g.c}</td><td>${g.d}</td><td>${g.m}</td><td class="n">${fmt(g.v)}</td></tr>`).join('')+
+  `<tr style="font-weight:700"><td colspan="4">${r.length} registros</td><td class="n">${fmt(r.reduce((s,g)=>s+g.v,0))}</td></tr>`;
+}
+function render(){
+  try{M=compute(D)}catch(e){return err(e)}
+  err('');$('#t').firstChild.textContent='Dashboard de gastos – '+MES[M.mo][0].toUpperCase()+MES[M.mo].slice(1)+' '+M.y;
+  $('#sub').textContent='Moneda: COP · '+M.gs.length+' gastos registrados';
+  $('#chip').textContent=src;$('#chip').className='chip'+(linked?' on':'');
+  kpis();tables();insights();
+  if(window.Chart)charts_();else err('No se pudo cargar Chart.js (¿sin internet?). Los números sí se muestran.');
+}
+const err=e=>$('#err').textContent=e?(e.message||e):'';
+async function loadBuf(buf,name){
+  try{D=parse(XLSX.read(buf,{type:'array'}));src=(linked?'Vinculado: ':'Archivo: ')+name+' · '+new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});render()}
+  catch(e){err('No se pudo leer el Excel: '+(e.message||e))}
+}
+/* ---- Vínculo persistente (Chrome / Edge) ---- */
+const db=()=>new Promise((ok,ko)=>{const r=indexedDB.open('presupuesto',1);r.onupgradeneeded=()=>r.result.createObjectStore('h');r.onsuccess=()=>ok(r.result);r.onerror=ko});
+const idb=async(mode,fn)=>{const d=await db();return new Promise((ok,ko)=>{const t=d.transaction('h',mode),r=fn(t.objectStore('h'));t.oncomplete=()=>ok(r.result);t.onerror=ko})};
+async function readH(){const f=await linked.getFile();lastMod=f.lastModified;await loadBuf(await f.arrayBuffer(),f.name)}
+async function link(){
+  if(!window.showOpenFilePicker)return $('#fi').click();
+  try{[linked]=await showOpenFilePicker({types:[{description:'Excel',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx','.xlsm']}}]});
+    try{await idb('readwrite',s=>s.put(linked,'file'))}catch(e){} await readH()}catch(e){}
+}
+async function reconnect(){
+  try{if(await linked.requestPermission({mode:'read'})==='granted'){await readH();$('#bLink').textContent='🔗 Vincular otro Excel';$('#bLink').onclick=link}}catch(e){}
+}
+setInterval(async()=>{if(!linked)return;try{const f=await linked.getFile();if(f.lastModified!==lastMod){lastMod=f.lastModified;await loadBuf(await f.arrayBuffer(),f.name)}}catch(e){}},3000);
+/* ---- Eventos ---- */
+$('#bLink').onclick=link;$('#bFile').onclick=()=>$('#fi').click();
+$('#fi').onchange=async e=>{const f=e.target.files[0];if(f){linked=null;await loadBuf(await f.arrayBuffer(),f.name)}};
+$('#fc').onchange=gastos;$('#fq').oninput=gastos;
+['dragenter','dragover'].forEach(v=>addEventListener(v,e=>{e.preventDefault();$('#drop').style.display='flex'}));
+addEventListener('dragleave',e=>{if(!e.relatedTarget)$('#drop').style.display='none'});
+addEventListener('drop',async e=>{e.preventDefault();$('#drop').style.display='none';const f=e.dataTransfer.files[0];if(f){linked=null;await loadBuf(await f.arrayBuffer(),f.name)}});
+matchMedia('(prefers-color-scheme:dark)').onchange=()=>M&&window.Chart&&charts_();
+/* ---- Inicio ---- */
+(async()=>{
+  render();
+  try{const h=await idb('readonly',s=>s.get('file'));
+    if(h){linked=h;if(await h.queryPermission({mode:'read'})==='granted')await readH();else{$('#bLink').textContent='🔗 Reconectar Excel';$('#bLink').onclick=reconnect;$('#chip').textContent='Vinculado a '+h.name+' (falta permiso)'}return}}catch(e){}
+  if(location.protocol.startsWith('http')){try{const r=await fetch('Presupuesto_Mensual.xlsx',{cache:'no-store'});if(r.ok)await loadBuf(await r.arrayBuffer(),'Presupuesto_Mensual.xlsx')}catch(e){}}
+})();
+</script>
+</body>
+</html>
